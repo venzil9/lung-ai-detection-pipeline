@@ -50,8 +50,7 @@ Includes:
 ## Sample Outputs
 
 ### Pipeline Output
-Pipeline:
-Results/pipeline/pipeline_1.png
+![Pipeline](Results/pipeline/pipeline_1.png)
 
 ### Segmentation Output
 Segmentation:
