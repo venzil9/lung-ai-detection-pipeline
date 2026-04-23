@@ -25,6 +25,20 @@ Outputs include:
 - Classification Accuracy: ~99.55%
 - Pipeline (demo set): 9 / 9 correct
 
+- ## Sample Outputs
+
+### Pipeline Output
+![Pipeline](Results/Pipeline/pipeline_Bengin%20case%20%281%29.png)
+
+### Segmentation Output
+![Segmentation](Results/Segmentation/01_sample_with_consensus.png)
+
+### Preprocessing Metrics
+![Preprocessing](Results/Preprocessing/CNR,SSIM,RMSE.png)
+
+### Classification Output
+![Confusion Matrix](Results/Classification/05_confusion_matrix.png)
+
 ---
 
 ## Pipeline
