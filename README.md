@@ -37,7 +37,8 @@ Input CT → Denoising → Segmentation → Classification → Output
 
 Due to size limitations, full datasets and trained models are hosted externally:
 
-![Download here](https://drive.google.com/drive/folders/1Bl_nS8cAfuC_y7nNxdTA34jr3LdGmEB3?usp=sharing)
+Download here
+https://drive.google.com/drive/folders/1Bl_nS8cAfuC_y7nNxdTA34jr3LdGmEB3?usp=sharing
 
 Includes:
 - Segmentation dataset (LIDC-IDRI slices)
@@ -49,13 +50,16 @@ Includes:
 ## Sample Outputs
 
 ### Pipeline Output
-![Pipeline](Results/pipeline/pipeline_1.png)
+Pipeline:
+Results/pipeline/pipeline_1.png
 
 ### Segmentation Output
-![Segmentation](Results/segmentation/03_segmentation_samples.png)
+Segmentation:
+Results/segmentation/03_segmentation_samples.png
 
 ### Classification Output
-![Confusion Matrix](Results/classification/05_confusion_matrix.png)
+Confusion Matrix:
+Results/classification/05_confusion_matrix.png
 
 ---
 
