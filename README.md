@@ -47,21 +47,6 @@ Includes:
 
 ---
 
-## Sample Outputs
-
-### Pipeline Output
-![Pipeline](Results/pipeline/pipeline_1.png)
-
-### Segmentation Output
-Segmentation:
-Results/segmentation/03_segmentation_samples.png
-
-### Classification Output
-Confusion Matrix:
-Results/classification/05_confusion_matrix.png
-
----
-
 ## Installation
 
 pip install -r requirements.txt
