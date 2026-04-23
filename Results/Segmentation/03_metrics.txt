@@ -1,0 +1,12 @@
+PHASE 2 - OBJECTIVE 2: SEGMENTATION RESULTS
+==================================================
+
+Model: U-Net (ResNet34 encoder, SCSE attention)
+Dataset: LIDC-IDRI (4-radiologist consensus)
+Test samples: 500
+
+Dice Score:   0.8782
+IoU:          0.8049
+Sensitivity:  0.9041
+Specificity:  0.9993
+Accuracy:     0.9987

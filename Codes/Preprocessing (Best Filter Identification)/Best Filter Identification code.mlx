@@ -1,0 +1,307 @@
+% === PHASE 2 — LDCT FILTER COMPARISON ON 100 MIXED CT IMAGES ===
+% Dataset: IQ-OTHNCCD (40 Normal + 30 Benign + 30 Malignant)
+% Methodology: No-reference denoising evaluation across all diagnostic categories
+% Metrics: Noise Std, SNR (dB), PSNR (dB), CNR, SSIM, RMSE, EPI, Entropy
+
+clc; clear; close all;
+
+inputFolder  = 'C:\phase2\Input';
+outputBase   = 'C:\phase2\output';
+
+filterNames = {'gaussian','median','wiener','bilateral','butterworth'};
+for i = 1:length(filterNames)
+    if ~exist(fullfile(outputBase, filterNames{i}), 'dir')
+        mkdir(fullfile(outputBase, filterNames{i}));
+    end
+end
+
+% Load images
+files = [dir(fullfile(inputFolder,'*.png')); ...
+         dir(fullfile(inputFolder,'*.jpg')); ...
+         dir(fullfile(inputFolder,'*.jpeg')); ...
+         dir(fullfile(inputFolder,'*.bmp'))];
+numImages = length(files);
+fprintf('Found %d LDCT images\n', numImages);
+
+if numImages == 0
+    error('No images found in %s. Check that images are copied there.', inputFolder);
+end
+
+% Auto-detect category from filename (Bengin/Malignant/Normal keywords)
+categories = cell(numImages,1);
+for k = 1:numImages
+    fname = lower(files(k).name);
+    if contains(fname, 'beni') || contains(fname, 'bengin')
+        categories{k} = 'Benign';
+    elseif contains(fname, 'mali')
+        categories{k} = 'Malignant';
+    elseif contains(fname, 'norm')
+        categories{k} = 'Normal';
+    else
+        categories{k} = 'Unknown';
+    end
+end
+fprintf('Normal: %d | Benign: %d | Malignant: %d | Unknown: %d\n\n', ...
+    sum(strcmp(categories,'Normal')), sum(strcmp(categories,'Benign')), ...
+    sum(strcmp(categories,'Malignant')), sum(strcmp(categories,'Unknown')));
+
+% Init result storage
+for fn = 1:5
+    results.(filterNames{fn}).noiseStd = zeros(numImages,1);
+    results.(filterNames{fn}).snr      = zeros(numImages,1);
+    results.(filterNames{fn}).psnr     = zeros(numImages,1);
+    results.(filterNames{fn}).cnr      = zeros(numImages,1);
+    results.(filterNames{fn}).ssim     = zeros(numImages,1);
+    results.(filterNames{fn}).rmse     = zeros(numImages,1);
+    results.(filterNames{fn}).epi      = zeros(numImages,1);
+    results.(filterNames{fn}).entropy  = zeros(numImages,1);
+end
+inputNoiseStd = zeros(numImages,1);
+inputSNR      = zeros(numImages,1);
+inputCNR      = zeros(numImages,1);
+inputEntropy  = zeros(numImages,1);
+
+% Process each LDCT image
+for k = 1:numImages
+    fprintf('Image %d/%d [%s]: %s\n', k, numImages, categories{k}, files(k).name);
+    try
+        img = imread(fullfile(inputFolder, files(k).name));
+    catch
+        fprintf('Skipped corrupt: %s\n', files(k).name);
+        continue;
+    end
+    if size(img,3) == 3, img = rgb2gray(img); end
+    img = imresize(img, [512 512]);
+    ldct = im2double(img);       % real LDCT input (already noisy)
+    
+    % Apply 5 filters DIRECTLY on LDCT (no synthetic noise added)
+    g = imgaussfilt(ldct, 1.5);
+    m = medfilt2(ldct, [3 3]);
+    w = wiener2(ldct, [5 5]);
+    b = imbilatfilt(ldct, 0.05, 3);
+    
+    % Butterworth low-pass (frequency domain)
+    [M,N] = size(ldct); D0 = 50; nb = 2;
+    [u,v] = meshgrid(1:N, 1:M);
+    D = sqrt((u - N/2).^2 + (v - M/2).^2);
+    H = 1 ./ (1 + (D./D0).^(2*nb));
+    F = fftshift(fft2(ldct));
+    bw = real(ifft2(ifftshift(F .* H)));
+    bw = mat2gray(bw);
+    
+    filtered = {g, m, w, b, bw};
+    
+    % Homogeneous patch (center 50x50-ish) for noise + SNR estimation
+    cx = round(M/2); cy = round(N/2);
+    sigPatch = ldct(cx-25:cx+25, cy-25:cy+25);
+    bgPatch  = ldct(cx-85:cx-35, cy-85:cy-35);
+    
+    inputNoiseStd(k) = std(sigPatch(:));
+    inputSNR(k)      = 20 * log10(abs(mean(sigPatch(:))) / (std(sigPatch(:)) + eps));
+    inputCNR(k)      = abs(mean(sigPatch(:)) - mean(bgPatch(:))) / ...
+                       sqrt(var(sigPatch(:)) + var(bgPatch(:)) + eps);
+    inputEntropy(k)  = entropy(ldct);
+    
+    % Sobel edges of original for EPI reference
+    edgesRef = edge(ldct, 'sobel');
+    
+    % Metrics for each filter
+    for fn = 1:5
+        fimg = filtered{fn};
+        patchF = fimg(cx-25:cx+25, cy-25:cy+25);
+        bgPatchF = fimg(cx-85:cx-35, cy-85:cy-35);
+        
+        % Noise std (lower = less noise)
+        results.(filterNames{fn}).noiseStd(k) = std(patchF(:));
+        
+        % SNR in dB
+        signal = mean(patchF(:));
+        noise  = std(patchF(:));
+        results.(filterNames{fn}).snr(k) = 20 * log10(abs(signal) / (noise + eps));
+        
+        % PSNR (dB) of filtered vs input LDCT
+        results.(filterNames{fn}).psnr(k) = psnr(fimg, ldct);
+        
+        % CNR
+        results.(filterNames{fn}).cnr(k) = abs(mean(patchF(:)) - mean(bgPatchF(:))) / ...
+                                           sqrt(var(patchF(:)) + var(bgPatchF(:)) + eps);
+        
+        % SSIM
+        results.(filterNames{fn}).ssim(k) = ssim(fimg, ldct);
+        
+        % RMSE
+        results.(filterNames{fn}).rmse(k) = sqrt(mean((fimg(:) - ldct(:)).^2));
+        
+        % Edge Preservation Index (EPI)
+        edgesF = edge(fimg, 'sobel');
+        a = double(edgesRef(:)); bvec = double(edgesF(:));
+        a = a - mean(a); bvec = bvec - mean(bvec);
+        epi_val = sum(a.*bvec) / (sqrt(sum(a.^2)*sum(bvec.^2)) + eps);
+        results.(filterNames{fn}).epi(k) = epi_val;
+        
+        % Entropy
+        results.(filterNames{fn}).entropy(k) = entropy(fimg);
+    end
+    
+    % Save filtered outputs
+    imwrite(g,  fullfile(outputBase,'gaussian',    files(k).name));
+    imwrite(m,  fullfile(outputBase,'median',      files(k).name));
+    imwrite(w,  fullfile(outputBase,'wiener',      files(k).name));
+    imwrite(b,  fullfile(outputBase,'bilateral',   files(k).name));
+    imwrite(bw, fullfile(outputBase,'butterworth', files(k).name));
+end
+
+% === OVERALL RESULTS TABLE ===
+T = table();
+T.Filter       = filterNames';
+T.AvgNoiseStd  = zeros(5,1);  T.StdNoiseStd = zeros(5,1);
+T.AvgSNR_dB    = zeros(5,1);  T.StdSNR_dB   = zeros(5,1);
+T.AvgPSNR_dB   = zeros(5,1);  T.StdPSNR_dB  = zeros(5,1);
+T.AvgCNR       = zeros(5,1);  T.StdCNR      = zeros(5,1);
+T.AvgSSIM      = zeros(5,1);  T.StdSSIM     = zeros(5,1);
+T.AvgRMSE      = zeros(5,1);  T.StdRMSE     = zeros(5,1);
+T.AvgEPI       = zeros(5,1);  T.StdEPI      = zeros(5,1);
+T.AvgEntropy   = zeros(5,1);
+
+for fn = 1:5
+    T.AvgNoiseStd(fn)  = mean(results.(filterNames{fn}).noiseStd);
+    T.StdNoiseStd(fn)  = std(results.(filterNames{fn}).noiseStd);
+    T.AvgSNR_dB(fn)    = mean(results.(filterNames{fn}).snr);
+    T.StdSNR_dB(fn)    = std(results.(filterNames{fn}).snr);
+    T.AvgPSNR_dB(fn)   = mean(results.(filterNames{fn}).psnr);
+    T.StdPSNR_dB(fn)   = std(results.(filterNames{fn}).psnr);
+    T.AvgCNR(fn)       = mean(results.(filterNames{fn}).cnr);
+    T.StdCNR(fn)       = std(results.(filterNames{fn}).cnr);
+    T.AvgSSIM(fn)      = mean(results.(filterNames{fn}).ssim);
+    T.StdSSIM(fn)      = std(results.(filterNames{fn}).ssim);
+    T.AvgRMSE(fn)      = mean(results.(filterNames{fn}).rmse);
+    T.StdRMSE(fn)      = std(results.(filterNames{fn}).rmse);
+    T.AvgEPI(fn)       = mean(results.(filterNames{fn}).epi);
+    T.StdEPI(fn)       = std(results.(filterNames{fn}).epi);
+    T.AvgEntropy(fn)   = mean(results.(filterNames{fn}).entropy);
+end
+
+fprintf('\n=========================================\n');
+fprintf('=== OVERALL LDCT FILTER COMPARISON (n=%d) ===\n', numImages);
+fprintf('=========================================\n');
+fprintf('Input LDCT Noise Std (mean): %.4f\n', mean(inputNoiseStd));
+fprintf('Input LDCT SNR (mean):       %.4f dB\n', mean(inputSNR));
+fprintf('Input LDCT CNR (mean):       %.4f\n', mean(inputCNR));
+fprintf('Input LDCT Entropy (mean):   %.4f\n\n', mean(inputEntropy));
+disp(T);
+writetable(T, fullfile(outputBase, 'metrics_overall.csv'));
+
+% === PER-CATEGORY TABLES 
+cats = {'Normal','Benign','Malignant'};
+for c = 1:length(cats)
+    idx = strcmp(categories, cats{c});
+    if sum(idx) == 0, continue; end
+    
+    Tc = table();
+    Tc.Filter      = filterNames';
+    Tc.AvgSNR_dB   = zeros(5,1);
+    Tc.AvgPSNR_dB  = zeros(5,1);
+    Tc.AvgCNR      = zeros(5,1);
+    Tc.AvgSSIM     = zeros(5,1);
+    Tc.AvgRMSE     = zeros(5,1);
+    Tc.AvgEPI      = zeros(5,1);
+    Tc.AvgNoiseStd = zeros(5,1);
+    
+    for fn = 1:5
+        Tc.AvgSNR_dB(fn)   = mean(results.(filterNames{fn}).snr(idx));
+        Tc.AvgPSNR_dB(fn)  = mean(results.(filterNames{fn}).psnr(idx));
+        Tc.AvgCNR(fn)      = mean(results.(filterNames{fn}).cnr(idx));
+        Tc.AvgSSIM(fn)     = mean(results.(filterNames{fn}).ssim(idx));
+        Tc.AvgRMSE(fn)     = mean(results.(filterNames{fn}).rmse(idx));
+        Tc.AvgEPI(fn)      = mean(results.(filterNames{fn}).epi(idx));
+        Tc.AvgNoiseStd(fn) = mean(results.(filterNames{fn}).noiseStd(idx));
+    end
+    
+    fprintf('\n=== %s CASES (n=%d) ===\n', upper(cats{c}), sum(idx));
+    disp(Tc);
+    writetable(Tc, fullfile(outputBase, sprintf('metrics_%s.csv', lower(cats{c}))));
+end
+
+% === CHARTS ===
+figure('Position',[100 100 1400 500]);
+subplot(1,4,1); bar(T.AvgNoiseStd);
+set(gca,'XTickLabel',filterNames,'XTickLabelRotation',30);
+title('Noise Std (lower = better)'); ylabel('Std'); grid on;
+
+subplot(1,4,2); bar(T.AvgSNR_dB);
+set(gca,'XTickLabel',filterNames,'XTickLabelRotation',30);
+title('SNR in dB (higher = better)'); ylabel('SNR (dB)'); grid on;
+
+subplot(1,4,3); bar(T.AvgPSNR_dB);
+set(gca,'XTickLabel',filterNames,'XTickLabelRotation',30);
+title('PSNR in dB (higher = better)'); ylabel('PSNR (dB)'); grid on;
+
+subplot(1,4,4); bar(T.AvgEPI);
+set(gca,'XTickLabel',filterNames,'XTickLabelRotation',30);
+title('Edge Preservation (higher = better)'); ylabel('EPI'); grid on;
+saveas(gcf, fullfile(outputBase,'filter_comparison_chart.png'));
+
+% === EXTRA METRIC CHARTS ===
+figure('Position',[100 100 1200 350]);
+subplot(1,3,1); bar(T.AvgCNR);
+set(gca,'XTickLabel',filterNames,'XTickLabelRotation',30);
+title('CNR (higher = better)'); ylabel('CNR'); grid on;
+
+subplot(1,3,2); bar(T.AvgSSIM);
+set(gca,'XTickLabel',filterNames,'XTickLabelRotation',30);
+title('SSIM (higher = better)'); ylabel('SSIM'); grid on;
+
+subplot(1,3,3); bar(T.AvgRMSE);
+set(gca,'XTickLabel',filterNames,'XTickLabelRotation',30);
+title('RMSE (lower = better)'); ylabel('RMSE'); grid on;
+saveas(gcf, fullfile(outputBase,'extra_metric_chart.png'));
+
+% === PER-CATEGORY GROUPED BAR CHART (flex) ===
+catData = zeros(3,5);  % rows = categories, cols = filters
+for c = 1:3
+    idx = strcmp(categories, cats{c});
+    for fn = 1:5
+        catData(c,fn) = mean(results.(filterNames{fn}).snr(idx));
+    end
+end
+figure('Position',[100 100 900 500]);
+bar(catData);
+set(gca,'XTickLabel',cats);
+legend(filterNames,'Location','best');
+title('SNR (dB) by Diagnostic Category');
+ylabel('SNR (dB)'); grid on;
+saveas(gcf, fullfile(outputBase,'category_comparison_chart.png'));
+
+% === SAMPLE VISUAL COMPARISON (first image) ===
+img1 = imread(fullfile(inputFolder, files(1).name));
+if size(img1,3)==3, img1 = rgb2gray(img1); end
+img1 = imresize(img1, [512 512]);
+
+figure('Position',[100 100 1500 280]);
+subplot(1,6,1); imshow(img1); title(['Input LDCT (' categories{1} ')']);
+subplot(1,6,2); imshow(imread(fullfile(outputBase,'gaussian',    files(1).name))); title('Gaussian');
+subplot(1,6,3); imshow(imread(fullfile(outputBase,'median',      files(1).name))); title('Median');
+subplot(1,6,4); imshow(imread(fullfile(outputBase,'wiener',      files(1).name))); title('Wiener');
+subplot(1,6,5); imshow(imread(fullfile(outputBase,'bilateral',   files(1).name))); title('Bilateral');
+subplot(1,6,6); imshow(imread(fullfile(outputBase,'butterworth', files(1).name))); title('Butterworth');
+saveas(gcf, fullfile(outputBase,'sample_comparison.png'));
+
+% === WINNER ANNOUNCEMENT ===
+[~, bestSNR]   = max(T.AvgSNR_dB);
+[~, bestPSNR]  = max(T.AvgPSNR_dB);
+[~, bestCNR]   = max(T.AvgCNR);
+[~, bestSSIM]  = max(T.AvgSSIM);
+[~, bestEPI]   = max(T.AvgEPI);
+[~, bestNoise] = min(T.AvgNoiseStd);
+[~, bestRMSE]  = min(T.AvgRMSE);
+
+fprintf('\n=== WINNERS ===\n');
+fprintf('Best SNR (dB):          %s (%.2f dB)\n',  filterNames{bestSNR},   T.AvgSNR_dB(bestSNR));
+fprintf('Best PSNR (dB):         %s (%.2f dB)\n',  filterNames{bestPSNR},  T.AvgPSNR_dB(bestPSNR));
+fprintf('Best CNR:               %s (%.4f)\n',     filterNames{bestCNR},   T.AvgCNR(bestCNR));
+fprintf('Best SSIM:              %s (%.4f)\n',     filterNames{bestSSIM},  T.AvgSSIM(bestSSIM));
+fprintf('Best RMSE (lowest):     %s (%.4f)\n',     filterNames{bestRMSE},  T.AvgRMSE(bestRMSE));
+fprintf('Best Noise Reduction:   %s (Std=%.4f)\n', filterNames{bestNoise}, T.AvgNoiseStd(bestNoise));
+fprintf('Best Edge Preservation: %s (EPI=%.4f)\n', filterNames{bestEPI},   T.AvgEPI(bestEPI));
+
+fprintf('\n DONE. Check output folder: %s\n', outputBase);

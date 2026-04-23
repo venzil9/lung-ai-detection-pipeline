@@ -1,0 +1,20 @@
+LUNG CANCER CLASSIFICATION RESULTS
+============================================================
+
+Model: ResNet18 (ImageNet pretrained)
+Dataset: IQ-OTHNCCD (Benign / Malignant / Normal)
+Test samples: 110
+
+Test Accuracy: 0.9727
+Best Val Accuracy: 0.9909
+
+Class          Precision   Recall    F1        Support 
+Benign         0.8750      0.7778    0.8235    9       
+Malignant      0.9841      1.0000    0.9920    62      
+Normal         0.9744      0.9744    0.9744    39      
+
+Confusion Matrix (rows=true, cols=pred):
+            Benign      Malignant   Normal      
+Benign      7           1           1           
+Malignant   0           62          0           
+Normal      1           0           38          
